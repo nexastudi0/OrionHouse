@@ -26,6 +26,8 @@ let screensaverActive = false;
 let micStream = null;
 let recognitionStarting = false;
 let lastRestartAt = 0;
+let voiceWatchdog = null;
+let wakeLockRetryTimer = null;
 
 const els = {
   list: document.getElementById('list'),
@@ -214,10 +216,24 @@ async function startRecognition(){
 }
 function scheduleRestart(delay=350){
   clearTimeout(restartTimer);
-  if(!alwaysListening || speaking) return;
+  if(!alwaysListening || speaking || currentMode!=='home') return;
   const now=Date.now();
   const guard=Math.max(delay,250-(now-lastRestartAt));
-  restartTimer=setTimeout(()=>{ lastRestartAt=Date.now(); startRecognition(); },guard);
+  restartTimer=setTimeout(()=>{
+    lastRestartAt=Date.now();
+    startRecognition();
+  },guard);
+}
+function startVoiceWatchdog(){
+  stopVoiceWatchdog();
+  voiceWatchdog=setInterval(()=>{
+    if(currentMode!=='home' || !alwaysListening || speaking) return;
+    if(!listening && !recognitionStarting) startRecognition();
+    if(screensaverActive && document.visibilityState==='visible' && !wakeLock) requestWakeLock();
+  },1500);
+}
+function stopVoiceWatchdog(){
+  if(voiceWatchdog){ clearInterval(voiceWatchdog); voiceWatchdog=null; }
 }
 function armWakeWindow(){
   waitingForCommand=true; clearTimeout(wakeTimer); updateVoiceUI();
@@ -231,8 +247,15 @@ function setupVoice(){
   else if(!window.isSecureContext && location.hostname!=='localhost') els.heard.textContent='O Orion precisa de HTTPS ou localhost para usar o microfone.';
   if(!SR){ els.voiceBtn.disabled=true; els.heard.textContent='Use Chrome ou Edge para reconhecimento de voz.'; els.micStatus.textContent='● Voz indisponível'; return; }
   recognition=new SR(); recognition.lang='pt-BR'; recognition.interimResults=true; recognition.continuous=true; recognition.maxAlternatives=3;
-  recognition.onstart=()=>{ listening=true; els.heard.textContent=waitingForCommand?'Pode falar o comando.':'Aguardando você dizer “Orion”...'; updateVoiceUI(); };
-  recognition.onend=()=>{ listening=false; scheduleRestart(800); };
+  recognition.onstart=()=>{
+    listening=true;
+    els.heard.textContent=waitingForCommand?'Pode falar o comando.':'Aguardando você dizer “Orion”...';
+    updateVoiceUI();
+  };
+  recognition.onend=()=>{
+    listening=false;
+    if(alwaysListening && currentMode==='home') scheduleRestart(screensaverActive ? 250 : 650);
+  };
   recognition.onerror=e=>{
     listening=false;
     if(e.error==='not-allowed'||e.error==='service-not-allowed'){
@@ -258,24 +281,77 @@ function setupVoice(){
 }
 
 async function requestWakeLock(){
-  if(!('wakeLock' in navigator)||!alwaysListening||currentMode!=='home') return;
-  try{wakeLock=await navigator.wakeLock.request('screen');wakeLock.addEventListener('release',()=>{wakeLock=null;});}catch(_){wakeLock=null;}
+  if(!('wakeLock' in navigator)||!alwaysListening||currentMode!=='home'||document.visibilityState!=='visible') return;
+  try{
+    if(wakeLock) return;
+    wakeLock=await navigator.wakeLock.request('screen');
+    wakeLock.addEventListener('release',()=>{
+      wakeLock=null;
+      clearTimeout(wakeLockRetryTimer);
+      if(screensaverActive && alwaysListening && document.visibilityState==='visible'){
+        wakeLockRetryTimer=setTimeout(requestWakeLock,800);
+      }
+    });
+  }catch(_){wakeLock=null;}
 }
-function releaseWakeLock(){if(wakeLock){try{wakeLock.release();}catch(_){}wakeLock=null;}}
-function enterScreensaver(){if(currentMode!=='home')return;if(!alwaysListening){notify('Ative o Orion antes da tela de descanso.');return;}screensaverActive=true;els.screensaver.classList.remove('hidden');els.screensaver.setAttribute('aria-hidden','false');document.body.style.overflow='hidden';requestWakeLock();}
-function exitScreensaver(){screensaverActive=false;els.screensaver.classList.add('hidden');els.screensaver.setAttribute('aria-hidden','true');document.body.style.overflow='';releaseWakeLock();}
+function releaseWakeLock(){
+  clearTimeout(wakeLockRetryTimer);
+  if(wakeLock){try{wakeLock.release();}catch(_){}wakeLock=null;}
+}
+function keepOrionAlive(){
+  if(currentMode!=='home' || !alwaysListening) return;
+  startVoiceWatchdog();
+  if(!listening && !speaking) startRecognition();
+}
+function enterScreensaver(){
+  if(currentMode!=='home') return;
+  if(!alwaysListening){ notify('Ative o Orion antes da tela de descanso.'); return; }
+  screensaverActive=true;
+  els.screensaver.classList.remove('hidden');
+  els.screensaver.setAttribute('aria-hidden','false');
+  document.body.style.overflow='hidden';
+  requestWakeLock();
+  // A tela de descanso e somente visual. O reconhecimento continua rodando por baixo.
+  setTimeout(keepOrionAlive,120);
+}
+function exitScreensaver(){
+  screensaverActive=false;
+  els.screensaver.classList.add('hidden');
+  els.screensaver.setAttribute('aria-hidden','true');
+  document.body.style.overflow='';
+  releaseWakeLock();
+  if(alwaysListening) setTimeout(keepOrionAlive,120);
+}
 els.screensaverBtn.addEventListener('click',enterScreensaver);
 els.screensaverExit.addEventListener('click',exitScreensaver);
 els.screensaver.addEventListener('dblclick',exitScreensaver);
-document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible'&&screensaverActive)requestWakeLock();});
+document.addEventListener('visibilitychange',()=>{
+  if(document.visibilityState==='visible'){
+    if(screensaverActive) requestWakeLock();
+    if(alwaysListening) setTimeout(keepOrionAlive,150);
+  }
+});
+window.addEventListener('focus',()=>{ if(alwaysListening) setTimeout(keepOrionAlive,120); });
+window.addEventListener('pageshow',()=>{ if(alwaysListening) setTimeout(keepOrionAlive,120); });
 
 els.voiceBtn.addEventListener('click',async()=>{
   if(!recognition)return;
   const turningOn=!alwaysListening;
   if(turningOn){const ok=await ensureMicPermission();if(!ok)return;}
   alwaysListening=turningOn;waitingForCommand=false;clearTimeout(wakeTimer);
-  if(alwaysListening){els.heard.textContent='Aguardando você dizer “Orion”...';updateVoiceUI();startRecognition();}
-  else{clearTimeout(restartTimer);try{recognition.stop();}catch(_){}releaseMic();els.heard.textContent='Orion desativado. Toque em “Ativar Orion” para voltar a ouvir.';updateVoiceUI();}
+  if(alwaysListening){
+    els.heard.textContent='Aguardando você dizer “Orion”...';
+    updateVoiceUI();
+    startVoiceWatchdog();
+    startRecognition();
+  }else{
+    stopVoiceWatchdog();
+    clearTimeout(restartTimer);
+    try{recognition.stop();}catch(_){}
+    releaseMic();
+    els.heard.textContent='Orion desativado. Toque em “Ativar Orion” para voltar a ouvir.';
+    updateVoiceUI();
+  }
 });
 
 function processVoiceTranscript(raw){
@@ -284,75 +360,11 @@ function processVoiceTranscript(raw){
   if(wakeMatch){const command=(wakeMatch[1]||'').trim();if(command){waitingForCommand=false;clearTimeout(wakeTimer);updateVoiceUI();els.heard.textContent=`Comando: “${command}”`;handleCommand(command);}else armWakeWindow();return;}
   if(waitingForCommand){waitingForCommand=false;clearTimeout(wakeTimer);updateVoiceUI();els.heard.textContent=`Comando: “${raw}”`;handleCommand(raw);}
 }
-function normalizeCommandText(text){
-  return String(text || '')
-    .toLowerCase()
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g,'')
-    .replace(/[“”"']/g,'')
-    .replace(/\s+/g,' ')
-    .trim();
-}
-
 function cleanAddCommand(text){
-  let cleaned = normalizeCommandText(text);
-
-  // Remove formas naturais de pedir algo ao Orion sem salvar a frase inteira.
-  cleaned = cleaned
-    .replace(/^orion[,:;!?]?\s*/i,'')
-    .replace(/^(por favor\s+)?(?:voce\s+)?(?:pode|poderia|consegue)\s+(?:por favor\s+)?/i,'')
-    .replace(/^(?:eu\s+)?(?:quero que voce|quero que|gostaria que voce|gostaria que)\s+/i,'')
-    .replace(/^(?:por favor\s+)?(?:adiciona|adicione|adicionar|coloca|coloque|colocar|bota|bote|botar|inclui|inclua|incluir|anota|anote|anotar|acrescenta|acrescente|acrescentar|poe|por)\s+(?:pra|para)?\s*/i,'')
-    .replace(/^(?:eu\s+)?(?:preciso de|precisamos de|quero comprar|quero|esta faltando|ta faltando|falta)\s+/i,'');
-
-  // Remove o destino do comando independentemente da forma falada.
-  cleaned = cleaned
-    .replace(/\s+(?:na|no|a|pra|para|em)\s+(?:a\s+)?(?:minha\s+|nossa\s+)?lista(?:\s+(?:de|do)\s+(?:compras|mercado))?\s*$/i,'')
-    .replace(/\s+(?:na|no|a|pra|para|em)\s+lista(?:\s+(?:de|do)\s+(?:compras|mercado))?\s*$/i,'')
-    .replace(/\s+(?:de|do)\s+(?:compras|mercado)\s*$/i,'')
-    .replace(/^(?:um|uma)\s+(?:item|produto)\s+(?:chamado|chamada)?\s*/i,'')
-    .replace(/[.!?;:]+$/,'')
-    .replace(/\s+/g,' ')
-    .trim();
-
-  return cleaned;
-}
-
-function parseItemsFromCommand(text){
-  const cleaned = cleanAddCommand(text);
-  if(!cleaned) return [];
-
-  const quantityWords = {um:1,uma:1,dois:2,duas:2,tres:3,quatro:4,cinco:5,seis:6,sete:7,oito:8,nove:9,dez:10};
-  return cleaned
-    .split(/\s*(?:,|\be\b|\bmais\b)\s*/i)
-    .map(part=>part.trim())
-    .filter(Boolean)
-    .map(part=>{
-      let qty=1;
-      let name=part
-        .replace(/^(?:tambem\s+|e\s+|mais\s+)/i,'')
-        .replace(/\s+(?:na|no|a|pra|para|em)\s+(?:a\s+)?(?:minha\s+|nossa\s+)?lista.*$/i,'')
-        .trim();
-
-      let m=name.match(/^(\d+)\s*(?:x|unidades?|unidade)?\s+(.+)$/i);
-      if(m){ qty=Number(m[1]); name=m[2].trim(); }
-      else {
-        m=name.match(/^(um|uma|dois|duas|tres|quatro|cinco|seis|sete|oito|nove|dez)\s+(.+)$/i);
-        if(m){ qty=quantityWords[m[1].toLowerCase()]||1; name=m[2].trim(); }
-      }
-
-      name=name
-        .replace(/^(?:de|do|da)\s+/i,'')
-        .replace(/^(?:um|uma)\s+/i,'')
-        .replace(/\s+/g,' ')
-        .trim();
-
-      // Segurança contra salvar novamente a instrução inteira.
-      if(/\b(?:lista|adicione|adiciona|coloque|coloca|acrescente|acrescenta|anote|anota)\b/i.test(name)) return null;
-      if(!name || name.length>80) return null;
-      return {name, qty};
-    })
-    .filter(Boolean);
+  return text
+    .replace(/^(por favor\s+)?(adiciona|adicione|adicionar|coloca|coloque|colocar|bota|bote|botar|inclui|inclua|incluir|anota|anote|anotar|preciso de|precisamos de|quero|quero comprar)\s+/i,'')
+    .replace(/\s+(na|à|a|pra|para)\s+(minha\s+)?lista(?:\s+(do|de)\s+mercado)?\s*$/i,'')
+    .replace(/\s+(na|à|a|pra|para)\s+lista\s*$/i,'').replace(/[.!?]+$/,'').trim();
 }
 async function handleCommand(raw){
   let text=raw.toLowerCase().trim().replace(/^orion\b[,:;!?]?\s*/i,'');
@@ -370,14 +382,9 @@ async function handleCommand(raw){
   if(removeMatch){const target=removeMatch[1].trim();const item=items.find(i=>i.name.toLowerCase().includes(target));if(item){const {error}=await sb.from('shopping_items').delete().eq('id',item.id);if(!error){await loadItems(false);speak(`${item.name} removido da lista.`);}else speak('Não consegui remover o item.');}else speak(`Não encontrei ${target} na lista.`);return;}
   const markMatch=text.match(/(?:marcar|marca|marque)\s+(.+?)\s+(?:como )?(?:comprado|comprada|pego|pega|feito|feita)/);
   if(markMatch){const target=markMatch[1].trim();const item=items.find(i=>i.name.toLowerCase().includes(target));if(item){const {error}=await sb.from('shopping_items').update({done:true}).eq('id',item.id);if(!error){await loadItems(false);speak(`${item.name} marcado como comprado.`);}else speak('Não consegui atualizar o item.');}else speak(`Não encontrei ${target}.`);return;}
-  const parsedItems=parseItemsFromCommand(text);
-  if(!parsedItems.length){speak('Não entendi quais itens você quer adicionar.');return;}
-  const added=[];
-  for(const parsed of parsedItems){
-    const name=parsed.name; const qty=parsed.qty;
-    const ok=await addItem(name,qty,guessCategory(name));
-    if(ok) added.push(`${qty>1?qty+' ':''}${name}`);
-  }
+  text=cleanAddCommand(text); if(!text){speak('Não entendi o item.');return;}
+  const parts=text.split(/,|\s+e\s+/).map(s=>s.trim()).filter(Boolean); const added=[];
+  for(const part of parts){let qty=1,name=part;const m=part.match(/^(\d+)\s+(.+)$/);if(m){qty=Number(m[1]);name=m[2];}name=name.replace(/^(um|uma)\s+/,'').trim();if(!name)continue;const ok=await addItem(name,qty,guessCategory(name));if(ok)added.push(`${qty>1?qty+' ':''}${name}`);}
   if(!added.length){speak('Não consegui adicionar o item.');return;}
   speak(`Adicionei ${added.join(', ')} à lista.`); notify(added.length===1?`${cap(added[0])} adicionado.`:'Itens adicionados por voz.');
 }
@@ -405,7 +412,7 @@ async function applyMode(mode){
   els.loginScreen.classList.add('hidden'); els.appShell.classList.remove('hidden');
   els.modeSubtitle.textContent=mode==='street'?'Lista sincronizada para usar fora de casa.':'Assistente doméstico sincronizado com a nuvem.';
   if(mode==='street'){
-    alwaysListening=false;waitingForCommand=false;speaking=false;clearTimeout(restartTimer);clearTimeout(wakeTimer);
+    alwaysListening=false;waitingForCommand=false;speaking=false;stopVoiceWatchdog();clearTimeout(restartTimer);clearTimeout(wakeTimer);
     if(recognition&&listening){try{recognition.stop();}catch(_){}} releaseMic(); els.micStatus.textContent='● Modo Rua';
   }else{setupVoice();updateVoiceUI();}
   await loadItems(); startRealtime(); render();
@@ -426,7 +433,7 @@ els.loginForm.addEventListener('submit',async e=>{
 });
 
 els.logoutBtn.addEventListener('click',async()=>{
-  stopRealtime(); alwaysListening=false;waitingForCommand=false;clearTimeout(restartTimer);clearTimeout(wakeTimer);
+  stopRealtime(); alwaysListening=false;waitingForCommand=false;stopVoiceWatchdog();clearTimeout(restartTimer);clearTimeout(wakeTimer);
   if(recognition&&listening){try{recognition.stop();}catch(_){}} releaseMic(); exitScreensaver();
   await sb.auth.signOut(); currentUser=null;currentMode=null;items=[];render();
   els.appShell.classList.add('hidden');els.loginScreen.classList.remove('hidden');els.loginUser.value='';els.loginPass.value='';selectAccessMode('home');setCloudStatus('☁ Aguardando login');
