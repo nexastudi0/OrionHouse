@@ -54,7 +54,9 @@ const els = {
   screensaverBtn: document.getElementById('screensaverBtn'),
   screensaver: document.getElementById('screensaver'),
   screensaverExit: document.getElementById('screensaverExit'),
-  cloudStatus: document.getElementById('cloudStatus')
+  cloudStatus: document.getElementById('cloudStatus'),
+  startupOverlay: document.getElementById('startupOverlay'),
+  startupStatus: document.getElementById('startupStatus')
 };
 
 function uid(){ return `${Date.now()}-${Math.random().toString(16).slice(2)}`; }
@@ -62,6 +64,22 @@ function cap(s){ return s ? s.charAt(0).toUpperCase()+s.slice(1) : s; }
 function escapeHtml(s){ return String(s).replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#039;','"':'&quot;'}[c])); }
 function notify(msg){ els.toast.textContent = msg; els.toast.classList.add('show'); setTimeout(()=>els.toast.classList.remove('show'),2400); }
 function setCloudStatus(text, ok=true){ if(!els.cloudStatus) return; els.cloudStatus.textContent=text; els.cloudStatus.dataset.ok = ok ? '1' : '0'; }
+
+async function playStartupAnimation(mode='home', quick=false){
+  if(!els.startupOverlay) return;
+  const statusText = mode === 'street' ? 'Preparando sua lista sincronizada…' : 'Inicializando Orion da casa…';
+  if(els.startupStatus) els.startupStatus.textContent = statusText;
+  els.startupOverlay.classList.remove('hidden','fade-out');
+  els.startupOverlay.setAttribute('aria-hidden','false');
+  requestAnimationFrame(()=>els.startupOverlay.classList.add('show'));
+  const visibleTime = quick ? 900 : 1600;
+  await new Promise(r=>setTimeout(r, visibleTime));
+  els.startupOverlay.classList.add('fade-out');
+  await new Promise(r=>setTimeout(r, 420));
+  els.startupOverlay.classList.add('hidden');
+  els.startupOverlay.classList.remove('show','fade-out');
+  els.startupOverlay.setAttribute('aria-hidden','true');
+}
 
 function guessCategory(name){
   const n = name.toLowerCase();
@@ -429,7 +447,9 @@ els.loginForm.addEventListener('submit',async e=>{
   const role=await getProfileRole(data.user.id);
   if(!role){await sb.auth.signOut();return notify('Este usuário ainda não tem perfil Casa/Rua configurado. Rode o SQL de configuração.');}
   if(role!==selectedAccessMode){await sb.auth.signOut();return notify(role==='home'?'Este login pertence ao acesso Casa.':'Este login pertence ao acesso Rua.');}
-  currentUser=data.user; els.loginPass.value=''; await applyMode(role);
+  currentUser=data.user; els.loginPass.value='';
+  await playStartupAnimation(role);
+  await applyMode(role);
 });
 
 els.logoutBtn.addEventListener('click',async()=>{
@@ -444,7 +464,7 @@ async function restoreSession(){
   if(!session){setCloudStatus('☁ Aguardando login');return;}
   currentUser=session.user;
   const role=await getProfileRole(session.user.id);
-  if(role==='home'||role==='street'){selectAccessMode(role);await applyMode(role);}else{await sb.auth.signOut();notify('Perfil de acesso não configurado no Supabase.');}
+  if(role==='home'||role==='street'){selectAccessMode(role);await playStartupAnimation(role, true);await applyMode(role);}else{await sb.auth.signOut();notify('Perfil de acesso não configurado no Supabase.');}
 }
 
 sb.auth.onAuthStateChange((event,session)=>{
