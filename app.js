@@ -284,11 +284,75 @@ function processVoiceTranscript(raw){
   if(wakeMatch){const command=(wakeMatch[1]||'').trim();if(command){waitingForCommand=false;clearTimeout(wakeTimer);updateVoiceUI();els.heard.textContent=`Comando: “${command}”`;handleCommand(command);}else armWakeWindow();return;}
   if(waitingForCommand){waitingForCommand=false;clearTimeout(wakeTimer);updateVoiceUI();els.heard.textContent=`Comando: “${raw}”`;handleCommand(raw);}
 }
+function normalizeCommandText(text){
+  return String(text || '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g,'')
+    .replace(/[“”"']/g,'')
+    .replace(/\s+/g,' ')
+    .trim();
+}
+
 function cleanAddCommand(text){
-  return text
-    .replace(/^(por favor\s+)?(adiciona|adicione|adicionar|coloca|coloque|colocar|bota|bote|botar|inclui|inclua|incluir|anota|anote|anotar|preciso de|precisamos de|quero|quero comprar)\s+/i,'')
-    .replace(/\s+(na|à|a|pra|para)\s+(minha\s+)?lista(?:\s+(do|de)\s+mercado)?\s*$/i,'')
-    .replace(/\s+(na|à|a|pra|para)\s+lista\s*$/i,'').replace(/[.!?]+$/,'').trim();
+  let cleaned = normalizeCommandText(text);
+
+  // Remove formas naturais de pedir algo ao Orion sem salvar a frase inteira.
+  cleaned = cleaned
+    .replace(/^orion[,:;!?]?\s*/i,'')
+    .replace(/^(por favor\s+)?(?:voce\s+)?(?:pode|poderia|consegue)\s+(?:por favor\s+)?/i,'')
+    .replace(/^(?:eu\s+)?(?:quero que voce|quero que|gostaria que voce|gostaria que)\s+/i,'')
+    .replace(/^(?:por favor\s+)?(?:adiciona|adicione|adicionar|coloca|coloque|colocar|bota|bote|botar|inclui|inclua|incluir|anota|anote|anotar|acrescenta|acrescente|acrescentar|poe|por)\s+(?:pra|para)?\s*/i,'')
+    .replace(/^(?:eu\s+)?(?:preciso de|precisamos de|quero comprar|quero|esta faltando|ta faltando|falta)\s+/i,'');
+
+  // Remove o destino do comando independentemente da forma falada.
+  cleaned = cleaned
+    .replace(/\s+(?:na|no|a|pra|para|em)\s+(?:a\s+)?(?:minha\s+|nossa\s+)?lista(?:\s+(?:de|do)\s+(?:compras|mercado))?\s*$/i,'')
+    .replace(/\s+(?:na|no|a|pra|para|em)\s+lista(?:\s+(?:de|do)\s+(?:compras|mercado))?\s*$/i,'')
+    .replace(/\s+(?:de|do)\s+(?:compras|mercado)\s*$/i,'')
+    .replace(/^(?:um|uma)\s+(?:item|produto)\s+(?:chamado|chamada)?\s*/i,'')
+    .replace(/[.!?;:]+$/,'')
+    .replace(/\s+/g,' ')
+    .trim();
+
+  return cleaned;
+}
+
+function parseItemsFromCommand(text){
+  const cleaned = cleanAddCommand(text);
+  if(!cleaned) return [];
+
+  const quantityWords = {um:1,uma:1,dois:2,duas:2,tres:3,quatro:4,cinco:5,seis:6,sete:7,oito:8,nove:9,dez:10};
+  return cleaned
+    .split(/\s*(?:,|\be\b|\bmais\b)\s*/i)
+    .map(part=>part.trim())
+    .filter(Boolean)
+    .map(part=>{
+      let qty=1;
+      let name=part
+        .replace(/^(?:tambem\s+|e\s+|mais\s+)/i,'')
+        .replace(/\s+(?:na|no|a|pra|para|em)\s+(?:a\s+)?(?:minha\s+|nossa\s+)?lista.*$/i,'')
+        .trim();
+
+      let m=name.match(/^(\d+)\s*(?:x|unidades?|unidade)?\s+(.+)$/i);
+      if(m){ qty=Number(m[1]); name=m[2].trim(); }
+      else {
+        m=name.match(/^(um|uma|dois|duas|tres|quatro|cinco|seis|sete|oito|nove|dez)\s+(.+)$/i);
+        if(m){ qty=quantityWords[m[1].toLowerCase()]||1; name=m[2].trim(); }
+      }
+
+      name=name
+        .replace(/^(?:de|do|da)\s+/i,'')
+        .replace(/^(?:um|uma)\s+/i,'')
+        .replace(/\s+/g,' ')
+        .trim();
+
+      // Segurança contra salvar novamente a instrução inteira.
+      if(/\b(?:lista|adicione|adiciona|coloque|coloca|acrescente|acrescenta|anote|anota)\b/i.test(name)) return null;
+      if(!name || name.length>80) return null;
+      return {name, qty};
+    })
+    .filter(Boolean);
 }
 async function handleCommand(raw){
   let text=raw.toLowerCase().trim().replace(/^orion\b[,:;!?]?\s*/i,'');
@@ -306,9 +370,14 @@ async function handleCommand(raw){
   if(removeMatch){const target=removeMatch[1].trim();const item=items.find(i=>i.name.toLowerCase().includes(target));if(item){const {error}=await sb.from('shopping_items').delete().eq('id',item.id);if(!error){await loadItems(false);speak(`${item.name} removido da lista.`);}else speak('Não consegui remover o item.');}else speak(`Não encontrei ${target} na lista.`);return;}
   const markMatch=text.match(/(?:marcar|marca|marque)\s+(.+?)\s+(?:como )?(?:comprado|comprada|pego|pega|feito|feita)/);
   if(markMatch){const target=markMatch[1].trim();const item=items.find(i=>i.name.toLowerCase().includes(target));if(item){const {error}=await sb.from('shopping_items').update({done:true}).eq('id',item.id);if(!error){await loadItems(false);speak(`${item.name} marcado como comprado.`);}else speak('Não consegui atualizar o item.');}else speak(`Não encontrei ${target}.`);return;}
-  text=cleanAddCommand(text); if(!text){speak('Não entendi o item.');return;}
-  const parts=text.split(/,|\s+e\s+/).map(s=>s.trim()).filter(Boolean); const added=[];
-  for(const part of parts){let qty=1,name=part;const m=part.match(/^(\d+)\s+(.+)$/);if(m){qty=Number(m[1]);name=m[2];}name=name.replace(/^(um|uma)\s+/,'').trim();if(!name)continue;const ok=await addItem(name,qty,guessCategory(name));if(ok)added.push(`${qty>1?qty+' ':''}${name}`);}
+  const parsedItems=parseItemsFromCommand(text);
+  if(!parsedItems.length){speak('Não entendi quais itens você quer adicionar.');return;}
+  const added=[];
+  for(const parsed of parsedItems){
+    const name=parsed.name; const qty=parsed.qty;
+    const ok=await addItem(name,qty,guessCategory(name));
+    if(ok) added.push(`${qty>1?qty+' ':''}${name}`);
+  }
   if(!added.length){speak('Não consegui adicionar o item.');return;}
   speak(`Adicionei ${added.join(', ')} à lista.`); notify(added.length===1?`${cap(added[0])} adicionado.`:'Itens adicionados por voz.');
 }

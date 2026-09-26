@@ -1,0 +1,10 @@
+{
+  "name":"Orion Home",
+  "short_name":"Orion",
+  "start_url":"./",
+  "display":"standalone",
+  "background_color":"#090b10",
+  "theme_color":"#10131a",
+  "description":"Assistente doméstico por voz para listas de compras e necessidades da casa.",
+  "icons":[{"src":"icon.svg","sizes":"any","type":"image/svg+xml","purpose":"any maskable"}]
+}

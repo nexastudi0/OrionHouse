@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#10131a" />
+  <title>Orion Home</title>
+  <link rel="manifest" href="manifest.json" />
+  <link rel="icon" href="icon.svg" type="image/svg+xml" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <section class="login-screen" id="loginScreen">
+    <div class="login-card">
+      <div class="brand-orb">O</div>
+      <span class="eyebrow">NEXA HOME</span>
+      <h1>Orion Home</h1>
+      <p>Escolha como deseja acessar o sistema.</p>
+
+      <div class="access-tabs">
+        <button class="access-tab active" type="button" data-mode="home">🏠 Casa</button>
+        <button class="access-tab" type="button" data-mode="street">🛒 Rua</button>
+      </div>
+
+      <form id="loginForm" class="login-form">
+        <label>Usuário
+          <input id="loginUser" type="text" autocomplete="username" placeholder="Digite seu usuário" required />
+        </label>
+        <label>Senha
+          <input id="loginPass" type="password" autocomplete="current-password" placeholder="Digite sua senha" required />
+        </label>
+        <button class="primary-btn login-btn" type="submit">Entrar</button>
+      </form>
+      <div class="login-hint" id="loginHint">Acesso Casa: possui voz e gerenciamento completo.</div>
+    </div>
+  </section>
+
+  <div class="app-shell hidden" id="appShell">
+    <header class="topbar">
+      <div>
+        <span class="eyebrow">NEXA HOME</span>
+        <h1>Orion Home</h1>
+        <p id="modeSubtitle">Assistente doméstico para listas e necessidades da casa.</p>
+      </div>
+      <div class="header-actions">
+        <div class="status-pill" id="micStatus">● Pronto</div>
+        <button class="ghost-btn home-only" id="screensaverBtn" disabled>🌙 Tela de descanso</button>
+        <button class="ghost-btn" id="logoutBtn">Sair</button>
+      </div>
+    </header>
+
+    <main class="content">
+      <section class="hero card home-only">
+        <div>
+          <span class="eyebrow">COMANDO POR VOZ</span>
+          <h2>Fale com o Orion</h2>
+          <p>Diga “Orion” e dê o comando. Ex.: “Orion, coloque arroz na minha lista.”</p>
+        </div>
+        <button class="voice-btn" id="voiceBtn" aria-label="Ativar comando por voz">
+          <span class="mic-icon">🎙️</span>
+          <span>Ativar Orion</span>
+        </button>
+        <div class="heard" id="heardText">Ative uma vez e deixe a página aberta. O Orion aguardará a palavra-chave “Orion”.</div>
+      </section>
+
+      <section class="street-banner card street-only hidden">
+        <div>
+          <span class="eyebrow">MODO RUA</span>
+          <h2>Lista de compras</h2>
+          <p>Modo simplificado, sem microfone. Marque os produtos conforme colocar no carrinho.</p>
+        </div>
+        <span class="street-icon">🛒</span>
+      </section>
+
+      <section class="stats-grid">
+        <div class="stat card"><strong id="totalCount">0</strong><span>Total</span></div>
+        <div class="stat card"><strong id="pendingCount">0</strong><span>Pendentes</span></div>
+        <div class="stat card"><strong id="doneCount">0</strong><span>Comprados</span></div>
+      </section>
+
+      <section class="card add-card home-only">
+        <div class="section-head">
+          <div><span class="eyebrow">ADICIONAR MANUALMENTE</span><h2>Novo item</h2></div>
+        </div>
+        <form id="itemForm" class="add-form">
+          <input id="itemName" type="text" placeholder="Ex.: Arroz" autocomplete="off" required />
+          <input id="itemQty" type="number" min="1" value="1" inputmode="numeric" aria-label="Quantidade" />
+          <select id="itemCategory" aria-label="Categoria">
+            <option value="Mercado">Mercado</option>
+            <option value="Casa">Casa</option>
+            <option value="Limpeza">Limpeza</option>
+            <option value="Higiene">Higiene</option>
+            <option value="Manutenção">Manutenção</option>
+            <option value="Outros">Outros</option>
+          </select>
+          <button class="primary-btn" type="submit">Adicionar</button>
+        </form>
+      </section>
+
+      <section class="card list-card">
+        <div class="section-head row-wrap">
+          <div>
+            <span class="eyebrow">LISTA ATUAL</span>
+            <h2>O que falta?</h2>
+          </div>
+          <div class="toolbar home-only">
+            <button class="ghost-btn" id="speakListBtn">🔊 Ler lista</button>
+            <button class="ghost-btn" id="clearDoneBtn">Limpar comprados</button>
+            <button class="danger-btn" id="clearAllBtn">Limpar tudo</button>
+          </div>
+        </div>
+
+        <div class="filters" id="filters">
+          <button class="filter active" data-filter="Todos">Todos</button>
+          <button class="filter" data-filter="Mercado">Mercado</button>
+          <button class="filter" data-filter="Casa">Casa</button>
+          <button class="filter" data-filter="Limpeza">Limpeza</button>
+          <button class="filter" data-filter="Higiene">Higiene</button>
+          <button class="filter" data-filter="Manutenção">Manutenção</button>
+          <button class="filter" data-filter="Outros">Outros</button>
+        </div>
+
+        <div id="emptyState" class="empty-state">Sua lista está vazia.</div>
+        <div id="list" class="shopping-list"></div>
+      </section>
+    </main>
+  </div>
+
+  <section class="screensaver hidden" id="screensaver" aria-hidden="true">
+    <div class="smoke smoke-a"></div>
+    <div class="smoke smoke-b"></div>
+    <div class="smoke smoke-c"></div>
+    <div class="screensaver-center">
+      <div class="screensaver-orb">O</div>
+      <h2>ORION</h2>
+      <div class="screensaver-status"><span></span> Ouvindo</div>
+      <p>Diga “Orion” para adicionar algo à lista.</p>
+      <button class="screensaver-exit" id="screensaverExit" type="button">Toque para voltar</button>
+    </div>
+  </section>
+
+  <div class="toast" id="toast"></div>
+  <script src="app.js"></script>
+</body>
+</html>
