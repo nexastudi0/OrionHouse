@@ -1,0 +1,18 @@
+ORION HOME - MICROFONE SEM PEDIR PERMISSAO A CADA FRASE
+
+IMPORTANTE:
+Nao abra o index.html diretamente pelo caminho D:\...\index.html.
+Quando o navegador mostra "Este arquivo quer usar os microfones", a pagina esta em file://.
+Nesse modo o Chrome/Edge pode pedir a permissao novamente quando o reconhecimento reinicia.
+
+NO WINDOWS:
+1. Clique duas vezes em INICIAR-ORION.bat
+2. O Orion abrira em http://localhost:8765
+3. Clique em "Ativar Orion"
+4. Escolha "Permitir o acesso ao site" no navegador
+5. Deixe a pagina aberta. O microfone permanece solicitado uma unica vez e o Orion continua ouvindo.
+
+O sistema agora usa reconhecimento continuo e mantem o stream do microfone aberto enquanto o Orion estiver ativado.
+Ao desativar o Orion, entrar no modo Rua ou sair da conta, o microfone e liberado.
+
+Para uso permanente em celular/tablet, publique o projeto em HTTPS. Isso tambem permite que a permissao fique associada ao site.
